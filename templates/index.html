@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assessment Recommender</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .result-card {
+            margin-bottom: 15px;
+            transition: all 0.3s ease;
+        }
+        .result-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        #loading {
+            display: none;
+        }
+        .card-header a {
+            color: inherit;
+            text-decoration: none;
+        }
+        .card-header a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">Assessment Recommender</h1>
+        
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-body">
+                        <form id="queryForm">
+                            <div class="mb-3">
+                                <label for="queryText" class="form-label">Describe what you're looking for:</label>
+                                <textarea class="form-control" id="queryText" rows="3" 
+                                    placeholder="Example: Looking for assessments on Python and ML, 45 mins max"></textarea>
+                            </div>
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary">Get Recommendations</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="loading" class="text-center mt-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Processing your request...</p>
+        </div>
+        
+        <div id="filtersContainer" class="mt-4" style="display:none;">
+            <h3>Understood Criteria</h3>
+            <div class="card">
+                <div class="card-body" id="filtersContent">
+                    <!-- Filters will be displayed here -->
+                </div>
+            </div>
+        </div>
+        
+        <div id="resultsContainer" class="mt-4" style="display:none;">
+            <h3>Recommended Assessments</h3>
+            <div id="resultsContent">
+                <!-- Results will be displayed here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Load title to URL mappings from final.txt
+        async function loadTitleMappings() {
+            try {
+                const response = await fetch('final.txt');
+                const text = await response.text();
+                const mappings = {};
+                
+                // Parse the text file with format "title => link"
+                text.split('\n').forEach(line => {
+                    if (line.includes('=>')) {
+                        const [title, url] = line.split('=>').map(part => part.trim());
+                        if (title && url) {
+                            mappings[title] = url;
+                        }
+                    }
+                });
+                
+                return mappings;
+            } catch (error) {
+                console.error('Error loading title mappings:', error);
+                return {};
+            }
+        }
+
+        document.getElementById('queryForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const query = document.getElementById('queryText').value.trim();
+            if (!query) return;
+            
+            // Show loading indicator
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('filtersContainer').style.display = 'none';
+            document.getElementById('resultsContainer').style.display = 'none';
+            
+            // Load title to URL mappings
+            const titleMappings = await loadTitleMappings();
+            
+            // Create form data
+            const formData = new FormData();
+            formData.append('query', query);
+            
+            // Send request
+            fetch('/recommend', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Hide loading
+                document.getElementById('loading').style.display = 'none';
+                
+                // Display filters
+                const filtersContainer = document.getElementById('filtersContainer');
+                const filtersContent = document.getElementById('filtersContent');
+                filtersContainer.style.display = 'block';
+                
+                let filtersHtml = '<ul class="list-group list-group-flush">';
+                if (data.filters.skills && data.filters.skills.length > 0) {
+                    filtersHtml += `<li class="list-group-item"><strong>Skills:</strong> ${data.filters.skills.join(', ')}</li>`;
+                }
+                if (data.filters.job_level) {
+                    filtersHtml += `<li class="list-group-item"><strong>Job Level:</strong> ${data.filters.job_level}</li>`;
+                }
+                if (data.filters.duration_limit) {
+                    filtersHtml += `<li class="list-group-item"><strong>Duration Limit:</strong> ${data.filters.duration_limit} minutes</li>`;
+                }
+                filtersHtml += '</ul>';
+                filtersContent.innerHTML = filtersHtml;
+                
+                // Display results
+                const resultsContainer = document.getElementById('resultsContainer');
+                const resultsContent = document.getElementById('resultsContent');
+                resultsContainer.style.display = 'block';
+                
+                if (data.recommendations && data.recommendations.length > 0) {
+                    let resultsHtml = '';
+                    data.recommendations.forEach(rec => {
+                        // Check if title has a corresponding URL in mappings
+                        const titleLink = titleMappings[rec.title] || '#';
+                        
+                        resultsHtml += `
+                            <div class="card result-card mb-3">
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <h5 class="mb-0"><a href="${titleLink}" target="_blank">${rec.title}</a></h5>
+                                    <span class="badge bg-primary">${rec.assessment_length || 'N/A'} mins</span>
+                                </div>
+                                <div class="card-body">
+                                    <p>${rec.description || 'No description available.'}</p>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        ${rec.job_levels ? `<span class="badge bg-secondary">${rec.job_levels}</span>` : ''}
+                                        ${rec.test_type ? `<span class="badge bg-info text-dark">${rec.test_type}</span>` : ''}
+                                        ${rec.remote_testing ? `<span class="badge bg-success">Remote Testing</span>` : ''}
+                                    </div>
+                                </div>
+                                <div class="card-footer text-muted">
+                                    Score: ${rec.score.toFixed(2)}
+                                </div>
+                            </div>
+                        `;
+                    });
+                    resultsContent.innerHTML = resultsHtml;
+                } else {
+                    resultsContent.innerHTML = '<div class="alert alert-warning">No recommendations found</div>';
+                }
+            })
+            .catch(error => {
+                document.getElementById('loading').style.display = 'none';
+                console.error('Error:', error);
+                alert('Error fetching recommendations. Please try again.');
+            });
+        });
+    </script>
+</body>
+</html>
